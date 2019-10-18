@@ -1,0 +1,21 @@
+# python
+*.pyc
+__pycache__
+.ipynb_checkpoints/
+.DS_Store
+
+# tex
+*.aux
+*.blg
+*.log
+*.out
+
+# other 
+figs/*
+*png
+
+# build 
+build
+dist
+figs
+*.egg*
