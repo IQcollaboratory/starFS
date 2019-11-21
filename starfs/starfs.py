@@ -8,8 +8,8 @@ import scipy as sp
 import warnings 
 from scipy.optimize import curve_fit
 from sklearn.mixture import GaussianMixture as GMix
-
-import util as UT 
+# --- local --- 
+from . import util as UT 
 
 
 class starFS(object): 
