@@ -258,6 +258,7 @@ class starFS(object):
         ''' Fit GMM components to P(SSFR) of given data and return best-fit
         '''
         n_bin = self._mbins.shape[0] # number of stellar mass bins.
+        assert n_bin > 0, 'no mass bins'
     
         # sort logM* into M* bins
         i_bins = np.digitize(logmstar, np.append(self._mbins[:,0], self._mbins[-1,1]))
@@ -296,6 +297,7 @@ class starFS(object):
             _gmms.append(gmms) 
             _bics.append(bics)
         
+        assert len(bin_mid) > 0, 'no mass bin has enough galaxies '
         if bin_mid[0] > 10.: 
             warnings.warn("The lowest M* bin is greater than 10^10, this may compromise the SFS identification scheme") 
         return bin_mid, gbests, nbests, _gmms, _bics
@@ -444,7 +446,7 @@ class starFS(object):
         # fiducial log M*  
         if logMfid is None: 
             logMfid = int(np.round(np.median(self._fit_logm)/0.5))*0.5
-            print('fiducial log M* ='+str(logMfid))
+            if not silent: print('fiducial log M* ='+str(logMfid))
         self._logMfid = logMfid
 
         # now fit line to the fit_Mstar and fit_SSFR values
@@ -477,11 +479,6 @@ class starFS(object):
         ''' Calculate the `distance` from the best-fit star-forming sequence 
         '''
         # check that .fit() has been run
-        if self._fit_method is None: 
-            msg_err = ''.join(["Cannot calculate the distance to the best-fit", 
-                " star forming sequence without first fitting the sequence"]) 
-            raise ValueError(msg_err) 
-
         if method == 'powerlaw':  
             # fit a powerlaw to the GMM SFS fits and then use it 
             # to measure the dSFS 
@@ -544,7 +541,92 @@ class starFS(object):
                 dsfs[inmlim & above] = logsfr[inmlim & above] - \
                         self._fit_logsfr[np.argmax(self._fit_logm)]
         return dsfs 
+    
+    def probSFS(self, logmstar, logsfr): 
+        ''' given logmstar and logsfr, calculate the "probability" of being on the SFS. 
+        
+        notes
+        -----
+        * these "probabilities" are solely based on their distance from the SFS GMM. 
+        '''
+        if self._fit_logm is None: raise ValueError("Run SFS fit first") 
 
+        if isinstance(logmstar, float): 
+            logmstar    = np.atleast_1d(logmstar) 
+            logsfr      = np.atleast_1d(logsfr) 
+        
+        logm_sfs, m_gmm_sfs, s_gmm_sfs, w_sfs = self._theta_sfs.T
+
+        try: 
+            logm_q, m_gmm_q, s_gmm_q, w_q = self._theta_q.T
+        except ValueError: 
+            logm_q = np.array([]) 
+        try: 
+            logm_int, m_gmm_int, s_gmm_int, w_int = self._theta_int.T
+        except ValueError: 
+            logm_int = np.array([]) 
+        try: 
+            logm_sbs, m_gmm_sbs, s_gmm_sbs, w_sbs = self._theta_sbs.T
+        except ValueError: 
+            logm_sbs = np.array([]) 
+        try: 
+            logm_int1, m_gmm_int1, s_gmm_int1, w_int1 = self._theta_int1.T
+        except ValueError: 
+            logm_int1 = np.array([]) 
+        try: 
+            logm_int2, m_gmm_int2, s_gmm_int2, w_int2 = self._theta_int2.T
+        except ValueError: 
+            logm_int2 = np.array([]) 
+        try:
+            logm_sbs1, m_gmm_sbs1, s_gmm_sbs1, w_sbs1 = self._theta_sbs1.T
+        except ValueError: 
+            logm_sbs1 = np.array([]) 
+        try: 
+            logm_sbs2, m_gmm_sbs2, s_gmm_sbs2, w_sbs2 = self._theta_sbs2.T
+        except ValueError: 
+            logm_sbs2 = np.array([]) 
+
+        # check that the logmstar is within the SFS bins 
+        mbin0 = self._mbins[self._has_nbinthresh,0]
+        mbin1 = self._mbins[self._has_nbinthresh,1]
+        nmbin = len(self._mbins_median)
+        assert np.sum(self._has_nbinthresh) == nmbin 
+
+        prob_sfs = np.tile(-999., logmstar.shape) 
+        for i_m in range(nmbin): 
+            inmbin = (logmstar > mbin0[i_m]) & (logmstar <= mbin1[i_m])
+            if np.sum(inmbin) == 0: continue 
+            _logssfr = logsfr[inmbin] - logmstar[inmbin]
+            
+            #assert np.arange(nmbin)[(mbin0[i_m] < logm_sfs) & (logm_sfs < mbin1[i_m])] == i_m 
+            mbin_q      = (mbin0[i_m] < logm_q) & (logm_q < mbin1[i_m]) 
+            mbin_int    = (mbin0[i_m] < logm_int) & (logm_int < mbin1[i_m]) 
+            mbin_int1   = (mbin0[i_m] < logm_int1) & (logm_int1 < mbin1[i_m]) 
+            mbin_int2   = (mbin0[i_m] < logm_int2) & (logm_int2 < mbin1[i_m]) 
+            mbin_sbs    = (mbin0[i_m] < logm_sbs) & (logm_sbs < mbin1[i_m]) 
+            mbin_sbs1   = (mbin0[i_m] < logm_sbs1) & (logm_sbs1 < mbin1[i_m]) 
+            mbin_sbs2   = (mbin0[i_m] < logm_sbs2) & (logm_sbs2 < mbin1[i_m]) 
+        
+            _pdf_sfs = w_sfs[i_m] * sp.stats.norm.pdf(_logssfr, loc=m_gmm_sfs[i_m], scale=s_gmm_sfs[i_m])
+            _pdf_q = np.zeros(np.sum(inmbin))
+            _pdf_int, _pdf_int1, _pdf_int2 = np.zeros(np.sum(inmbin)), np.zeros(np.sum(inmbin)), np.zeros(np.sum(inmbin))
+            _pdf_sbs, _pdf_sbs1, _pdf_sbs2 = np.zeros(np.sum(inmbin)), np.zeros(np.sum(inmbin)), np.zeros(np.sum(inmbin))
+            if np.sum(mbin_q) > 0: _pdf_q = w_q[mbin_q] * sp.stats.norm.pdf(_logssfr, loc=m_gmm_q[mbin_q], scale=s_gmm_q[mbin_q])
+            if np.sum(mbin_int) > 0: _pdf_int = w_int[mbin_int] * sp.stats.norm.pdf(_logssfr, loc=m_gmm_int[mbin_int], scale=s_gmm_int[mbin_int])
+            if np.sum(mbin_int1) > 0: _pdf_int1 = w_int1[mbin_int1] * sp.stats.norm.pdf(_logssfr, loc=m_gmm_int1[mbin_int1], scale=s_gmm_int1[mbin_int1])
+            if np.sum(mbin_int2) > 0: _pdf_int2 = w_int2[mbin_int2] * sp.stats.norm.pdf(_logssfr, loc=m_gmm_int2[mbin_int2], scale=s_gmm_int2[mbin_int2])
+            if np.sum(mbin_sbs) > 0: _pdf_sbs = w_sbs[mbin_sbs] * sp.stats.norm.pdf(_logssfr, loc=m_gmm_sbs[mbin_sbs], scale=s_gmm_sbs[mbin_sbs])
+            if np.sum(mbin_sbs1) > 0: _pdf_sbs1 = w_sbs1[mbin_sbs1] * sp.stats.norm.pdf(_logssfr, loc=m_gmm_sbs1[mbin_sbs1], scale=s_gmm_sbs1[mbin_sbs1])
+            if np.sum(mbin_sbs2) > 0: _pdf_sbs2 = w_sbs2[mbin_sbs2] * sp.stats.norm.pdf(_logssfr, loc=m_gmm_sbs2[mbin_sbs2], scale=s_gmm_sbs2[mbin_sbs2]) 
+
+            _pdf_tot = _pdf_sfs + _pdf_q + _pdf_int + _pdf_int1 + _pdf_int2 + _pdf_sbs + _pdf_sbs1 + _pdf_sbs2
+
+            prob_sfs[inmbin] = _pdf_sfs/_pdf_tot 
+
+        if -999. in prob_sfs: 
+            warnings.warn('%i galaxies have M* in bins without a well defined SFS' % (np.sum(prob_sfs == -999.))) 
+        return prob_sfs 
+        
     def frac_SFMS(self): 
         ''' Return the estimate of the fraction of galaxies that are on 
         the star formation main sequence as a function of mass produce from 
