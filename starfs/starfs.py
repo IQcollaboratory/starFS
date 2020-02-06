@@ -475,6 +475,60 @@ class starFS(object):
             print('logSFR_SFMS = %s (logM* - %s) + %s' % (str(round(m, 3)), str(round(logMfid,3)), str(round(c, 3))))
         return sfms_fit 
     
+    def broken_powerlaw(self, logMturnover=10.5, mlim=None, silent=True): 
+        ''' Find the best-fit broken power-law parameterization of the 
+        SFS from the logM* and log SFR_SFS fit from the `fit` method above.
+    
+        for log M* > logMturnover 
+            f_SFS(log M*)  = a1 * (log M* - logMturnover) + b 
+
+        for log M* <= logMturnover 
+            f_SFS(log M*)  = a2 * (log M*  - logMturnover) + b 
+
+        :param logMturnover: 
+            Turnover log M_*.(float)  
+
+        :returns sfms_fit: 
+            f_SFS(logM*)
+        '''
+        if self._fit_logm is None  or self._fit_logssfr is None or self._fit_logsfr is None: 
+            raise ValueError('Run `fit` method first')
+
+        # now fit line to the fit_Mstar and fit_SSFR values
+        xx = self._fit_logm - logMturnover  # log Mstar - log M_fid
+        yy = self._fit_logsfr
+        err = self._fit_err_logssfr
+        if mlim is not None: 
+            mcut = ((self._fit_logm > mlim[0]) & (self._fit_logm < mlim[1])) 
+            xx = xx[mcut]
+            yy = yy[mcut] 
+            err = err[mcut]
+
+        xx0 = xx[xx <= 0.]
+        yy0 = yy[xx <= 0.] 
+        err0 = err[xx <= 0.] 
+        xx1 = xx[xx > 0.] 
+        yy1 = yy[xx > 0.] 
+        err1 = err[xx > 0.] 
+
+        # chi-squared
+        def _chisq(theta): 
+            return np.sum((theta[0] * xx0 + theta[2] - yy0)**2/err0**2) + np.sum((theta[1] * xx1 + theta[2] - yy1)**2/err1**2)
+
+        tt = sp.optimize.minimize(_chisq, np.array([0.8, 0.8, 0.3])) 
+
+        self._logMturnover = logMturnover 
+        self._broken_powerlaw_m0 = tt['x'][0]
+        self._broken_powerlaw_m1 = tt['x'][1]
+        self._broken_powerlaw_c  = tt['x'][2]
+        
+        def _sfs_fit(_mm): 
+            mm = np.atleast_1d(_mm) 
+            mslope = np.tile(tt['x'][0], mm.shape) 
+            mslope[mm > logMturnover] = tt['x'][1] 
+            return mslope * (mm - logMturnover) + tt['x'][2] 
+        return _sfs_fit 
+    
     def d_SFS(self, logmstar, logsfr, method='interpexterp', err_thresh=None, silent=True): 
         ''' Calculate the `distance` from the best-fit star-forming sequence 
         '''
@@ -483,6 +537,14 @@ class starFS(object):
             # fit a powerlaw to the GMM SFS fits and then use it 
             # to measure the dSFS 
             fsfms = lambda mm: self._powerlaw_m * (mm - self._logMfid) + self._powerlaw_c 
+            dsfs = logsfr - fsfms(logmstar) 
+
+        elif method == 'broken_powerlaw': 
+            def fsfms(_mm): 
+                mm = np.atleast_1d(_mm) 
+                mslope = np.tile(self._broken_powerlaw_m0, mm.shape) 
+                mslope[mm > self._logMturnover] = self._broken_powerlaw_m1
+                return mslope * (mm - self._logMturnover) + self._broken_powerlaw_c 
             dsfs = logsfr - fsfms(logmstar) 
 
         elif method in ['interpexterp', 'nointerp']: 
